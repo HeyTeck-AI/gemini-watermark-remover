@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+
+# Binary files (FFmpeg binaries >100MB cannot be pushed to GitHub)
+bin/
+*.zip
+*.gz
+*.exe
+*.dll
+
+# Uploaded and processed media files
+uploads/
+processed/
+*.mp4
+*.mov
+*.webm
+*.avi
+*.mkv
+
+# Temporary images and test outputs
+frame_*.png
+test_*.png
+samples/
+
+# OS and IDE files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.log
