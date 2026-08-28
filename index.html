@@ -150,11 +150,11 @@
 
                 <!-- SAMPLE DEMO BUTTONS -->
                 <div class="w-full max-w-3xl mx-auto mt-6 flex flex-col sm:flex-row items-center justify-center gap-3">
-                    <button onclick="loadUploadedBeautyVideo()" class="w-full sm:w-auto px-5 py-3 rounded-xl bg-gemini-card hover:bg-gemini-hover border border-gemini-pink/60 text-xs font-extrabold text-gemini-pink transition-all flex items-center justify-center gap-2 shadow-lg">
-                        <span>✨ Load WishCare Shampoo Video (Your 33MB Video)</span>
+                    <button onclick="document.getElementById('videoFileInput').click()" class="w-full sm:w-auto px-6 py-3.5 rounded-xl bg-gemini-cyan hover:bg-cyan-300 text-black font-extrabold text-xs transition-all flex items-center justify-center gap-2 shadow-lg shadow-cyan-500/20 active:scale-95">
+                        <span>📂 Choose Video From Device</span>
                     </button>
-                    <button onclick="loadSampleVideoDemo()" class="w-full sm:w-auto px-5 py-3 rounded-xl bg-gemini-card hover:bg-gemini-hover border border-gemini-yellow/50 text-xs font-bold text-gemini-yellow transition-all flex items-center justify-center gap-2 shadow-lg">
-                        <span>⚡ Load Sample 9:16 Video</span>
+                    <button onclick="loadOnlineSampleVideo()" class="w-full sm:w-auto px-5 py-3.5 rounded-xl bg-gemini-card hover:bg-gemini-hover border border-gemini-yellow/50 text-xs font-bold text-gemini-yellow transition-all flex items-center justify-center gap-2 shadow-lg active:scale-95">
+                        <span>⚡ 1-Click Online Sample Demo Video</span>
                     </button>
                 </div>
             </div>
@@ -479,18 +479,11 @@
             }
         }
 
-        window.loadUploadedBeautyVideo = function() {
-            App.video.filename = '1787826519043_Beauty_shampoo.mp4';
-            mainVideoPlayer.src = getMediaUrl('/uploads/1787826519043_Beauty_shampoo.mp4');
-            document.getElementById('videoTitleDisplay').textContent = 'Beauty_shampoo.mp4 (WishCare)';
-            videoUploadHero.classList.add('hidden');
-            videoEditorWorkspace.classList.remove('hidden');
-        };
-
-        window.loadSampleVideoDemo = function() {
-            App.video.filename = 'sample:sample_video.mp4';
-            mainVideoPlayer.src = getMediaUrl('/samples/sample_video.mp4');
-            document.getElementById('videoTitleDisplay').textContent = 'sample_video.mp4';
+        window.loadOnlineSampleVideo = function() {
+            App.video.filename = 'Sample_Gemini_Video.mp4';
+            mainVideoPlayer.crossOrigin = 'anonymous';
+            mainVideoPlayer.src = 'https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ForBiggerBlazes.mp4';
+            document.getElementById('videoTitleDisplay').textContent = 'Sample_Gemini_Video.mp4';
             videoUploadHero.classList.add('hidden');
             videoEditorWorkspace.classList.remove('hidden');
         };
