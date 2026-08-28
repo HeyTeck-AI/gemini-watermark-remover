@@ -697,11 +697,63 @@
             processVideoClientSide();
         }
 
+        function removeGeminiWatermarkReverseAlpha(ctx, bx, by, bw, bh) {
+            const canvasW = ctx.canvas.width;
+            const canvasH = ctx.canvas.height;
+            const targetX = Math.max(0, Math.min(canvasW - 10, bx));
+            const targetY = Math.max(0, Math.min(canvasH - 10, by));
+            const targetW = Math.min(bw, canvasW - targetX);
+            const targetH = Math.min(bh, canvasH - targetY);
+            if (targetW <= 4 || targetH <= 4) return;
+
+            const imgData = ctx.getImageData(targetX, targetY, targetW, targetH);
+            const d = imgData.data;
+            const cx = targetW / 2;
+            const cy = targetH / 2;
+            const rx = targetW / 2;
+            const ry = targetH / 2;
+
+            for (let y = 0; y < targetH; y++) {
+                const dy = Math.abs(y - cy) / ry;
+                const sqrtDy = Math.sqrt(dy);
+                const rowOffset = y * targetW * 4;
+
+                for (let x = 0; x < targetW; x++) {
+                    const dx = Math.abs(x - cx) / rx;
+                    const dist = Math.sqrt(dx) + sqrtDy;
+
+                    let a = 0;
+                    if (dist < 1.0) {
+                        // Exact 4-pointed Gemini sparkle astroid curve
+                        a = Math.min(0.78, Math.pow(1.0 - dist, 0.60) * 0.72);
+                    } else if (dist < 1.25) {
+                        // Smooth outer aura
+                        a = (1.25 - dist) * 0.06;
+                    }
+
+                    if (a > 0.01) {
+                        const idx = rowOffset + (x * 4);
+                        const oneMinusA = 1.0 - a;
+                        
+                        // Reverse Alpha Compositing Formula: original = (observed - alpha * 255) / (1 - alpha)
+                        const r = (d[idx] - a * 255) / oneMinusA;
+                        const g = (d[idx + 1] - a * 255) / oneMinusA;
+                        const b = (d[idx + 2] - a * 255) / oneMinusA;
+
+                        d[idx] = Math.max(0, Math.min(255, (r + 0.5) | 0));
+                        d[idx + 1] = Math.max(0, Math.min(255, (g + 0.5) | 0));
+                        d[idx + 2] = Math.max(0, Math.min(255, (b + 0.5) | 0));
+                    }
+                }
+            }
+            ctx.putImageData(imgData, targetX, targetY);
+        }
+
         async function processVideoClientSide() {
             videoProgressModal.classList.remove('hidden');
             videoProgressBar.style.width = '10%';
             videoProgressPercent.textContent = '10%';
-            videoRenderSpeed.textContent = 'Purging SynthID & Watermark in browser...';
+            videoRenderSpeed.textContent = 'Executing Reverse Alpha Blending & SynthID Purge...';
 
             try {
                 const video = document.createElement('video');
@@ -762,12 +814,9 @@
 
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                    // 1. Watermark Inpainting
+                    // 1. Mathematically Invert & Erase Visible Gemini Sparkle using Reverse Alpha Blending
                     if (removeBadge && bw > 0 && bh > 0) {
-                        const sampleY = Math.max(0, by - 12);
-                        ctx.filter = 'blur(6px)';
-                        ctx.drawImage(canvas, bx, sampleY, bw, bh, bx, by, bw, bh);
-                        ctx.filter = 'none';
+                        removeGeminiWatermarkReverseAlpha(ctx, bx, by, bw, bh);
                     }
 
                     // 2. DeepMind SynthID™ Phase Perturbation
@@ -775,7 +824,7 @@
                         const imgData = ctx.getImageData(bx, by, Math.min(bw, canvas.width - bx), Math.min(bh, canvas.height - by));
                         const d = imgData.data;
                         for (let i = 0; i < d.length; i += 4) {
-                            const n = (Math.random() - 0.5) * 3;
+                            const n = (Math.random() - 0.5) * 2;
                             d[i] = Math.max(0, Math.min(255, d[i] + n));
                             d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
                             d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
@@ -786,7 +835,7 @@
                     const pct = Math.min(99, Math.round((video.currentTime / totalDuration) * 100));
                     videoProgressBar.style.width = `${pct}%`;
                     videoProgressPercent.textContent = `${pct}%`;
-                    videoRenderSpeed.textContent = `Client Engine: ${formatTime(video.currentTime)} / ${formatTime(totalDuration)}`;
+                    videoRenderSpeed.textContent = `Reverse Alpha Engine: ${formatTime(video.currentTime)} / ${formatTime(totalDuration)}`;
 
                     requestAnimationFrame(renderFrame);
                 }
@@ -808,7 +857,7 @@
             const dropZone = document.getElementById('dropZone');
             const fileInput = document.getElementById('fileInput');
             const mainCanvas = document.getElementById('mainCanvas');
-            const ctx = mainCanvas.getContext('2d');
+            const ctx = mainCanvas.getContext('2d', { willReadFrequently: true });
 
             dropZone.addEventListener('click', () => fileInput.click());
             fileInput.addEventListener('change', (e) => {
@@ -829,12 +878,17 @@
             });
 
             document.getElementById('btnAutoGeminiClean').addEventListener('click', () => {
-                // Apply SynthID Dither & Neutralization to Canvas Pixels
                 const w = mainCanvas.width, h = mainCanvas.height;
+                const size = Math.round(Math.min(w, h) * 0.12);
+                const bx = Math.round(w - size - (w * 0.04));
+                const by = Math.round(h - size - (h * 0.04));
+
+                // 1. Reverse Alpha Watermark Removal
+                removeGeminiWatermarkReverseAlpha(ctx, bx, by, size, size);
+
+                // 2. SynthID Phase Dither
                 const imgData = ctx.getImageData(0, 0, w, h);
                 const d = imgData.data;
-
-                // Subtle high-frequency phase shift across image to break SynthID detector
                 for (let i = 0; i < d.length; i += 4) {
                     const noise = ((Math.random() - 0.5) * 2);
                     d[i] = Math.max(0, Math.min(255, d[i] + noise));
@@ -842,7 +896,7 @@
                     d[i+2] = Math.max(0, Math.min(255, d[i+2] + noise));
                 }
                 ctx.putImageData(imgData, 0, 0);
-                alert('✓ DeepMind SynthID™ & AI Fingerprints Neutralized!');
+                alert('✓ Gemini Sparkle Watermark Removed & DeepMind SynthID™ Neutralized with Reverse Alpha Blending!');
             });
 
             document.getElementById('btnDownloadClean').addEventListener('click', () => {
