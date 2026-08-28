@@ -1,13 +1,4 @@
-server.js
-analyze_and_heal.js
-heal_exact_box.js
-heal_exact_box_v2.js
-perfect_heal.js
-perfect_heal_v2.js
-perfect_heal_v3.js
-perfect_heal_v4.js
-test_clean.js
-test_inpaint_pro.js
+backend/
 bin/
 uploads/
 processed/

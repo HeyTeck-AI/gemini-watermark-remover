@@ -1,0 +1,11 @@
+{
+  "name": "gemini-watermark-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "pngjs": "^7.0.0"
+  }
+}

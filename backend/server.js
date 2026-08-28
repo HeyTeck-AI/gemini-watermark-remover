@@ -5,12 +5,13 @@ const { spawn, execFile } = require('child_process');
 
 const PORT = 3000;
 
-// Directories
-const UPLOADS_DIR = path.join(__dirname, 'uploads');
-const PROCESSED_DIR = path.join(__dirname, 'processed');
-const BIN_DIR = path.join(__dirname, 'bin');
+const ROOT_DIR = path.join(__dirname, '..');
+const UPLOADS_DIR = path.join(ROOT_DIR, 'uploads');
+const PROCESSED_DIR = path.join(ROOT_DIR, 'processed');
+const BIN_DIR = path.join(ROOT_DIR, 'bin');
+const SAMPLES_DIR = path.join(ROOT_DIR, 'samples');
 
-[UPLOADS_DIR, PROCESSED_DIR, BIN_DIR].forEach(dir => {
+[UPLOADS_DIR, PROCESSED_DIR, BIN_DIR, SAMPLES_DIR].forEach(dir => {
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 });
 
@@ -118,9 +119,7 @@ const server = http.createServer((req, res) => {
 
                 let inputPath;
                 if (filename.startsWith('sample:')) {
-                    inputPath = path.join(__dirname, 'samples', 'sample_video.mp4');
-                } else if (filename === 'user_uploaded_image') {
-                    inputPath = path.join(__dirname, '..', '..', 'brain', 'a525d249-9033-4d68-bfa8-8212c00e3a12', '.user_uploaded', 'media_1787824704492.png');
+                    inputPath = path.join(SAMPLES_DIR, 'sample_video.mp4');
                 } else {
                     inputPath = path.join(UPLOADS_DIR, path.basename(filename));
                 }
@@ -287,7 +286,7 @@ const server = http.createServer((req, res) => {
     let reqPath = pathname;
     if (reqPath === '/') reqPath = '/index.html';
 
-    const filePath = path.join(__dirname, reqPath);
+    const filePath = path.join(ROOT_DIR, reqPath);
 
     fs.stat(filePath, (err, stats) => {
         if (err || !stats.isFile()) {
