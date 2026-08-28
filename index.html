@@ -3,8 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Gemini CleanAI — Total Watermark &amp; SynthID™ AI Remover</title>
-    <meta name="description" content="Erase visible Gemini/Omni watermarks, purge Google DeepMind SynthID™ invisible fingerprints, and strip C2PA metadata.">
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
+    <title>Gemini CleanAI v2.0 — In-Browser Watermark &amp; SynthID™ AI Remover</title>
+    <meta name="description" content="Erase visible Gemini/Omni watermarks, purge Google DeepMind SynthID™ invisible fingerprints, and strip C2PA metadata directly in browser.">
     <!-- Google Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -423,6 +426,28 @@
             videoDropZone.addEventListener('click', () => videoFileInput.click());
             videoFileInput.addEventListener('change', (e) => {
                 if (e.target.files && e.target.files.length > 0) uploadAndLoadVideo(e.target.files[0]);
+            });
+
+            // Drag and Drop support
+            ['dragenter', 'dragover'].forEach(name => {
+                videoDropZone.addEventListener(name, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    videoDropZone.classList.add('border-gemini-cyan', 'bg-gemini-card');
+                });
+            });
+            ['dragleave', 'drop'].forEach(name => {
+                videoDropZone.addEventListener(name, (e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    videoDropZone.classList.remove('border-gemini-cyan', 'bg-gemini-card');
+                });
+            });
+            videoDropZone.addEventListener('drop', (e) => {
+                const dt = e.dataTransfer;
+                if (dt && dt.files && dt.files.length > 0) {
+                    uploadAndLoadVideo(dt.files[0]);
+                }
             });
 
             btnPlayPause.addEventListener('click', toggleVideoPlay);
