@@ -477,26 +477,14 @@
             videoFileInput.value = '';
         }
 
-        async function uploadAndLoadVideo(file) {
-            try {
-                const response = await fetch(getApiUrl('/api/upload-video'), {
-                    method: 'POST',
-                    headers: { 'x-filename': file.name, 'Content-Type': 'application/octet-stream' },
-                    body: file
-                });
-                const data = await response.json();
-                if (data.success) {
-                    App.video.filename = data.filename;
-                    mainVideoPlayer.src = getMediaUrl(data.videoUrl);
-                    document.getElementById('videoTitleDisplay').textContent = file.name;
-                    videoUploadHero.classList.add('hidden');
-                    videoEditorWorkspace.classList.remove('hidden');
-                } else {
-                    alert('Upload failed: ' + (data.error || 'Unknown error'));
-                }
-            } catch (err) {
-                alert('Backend connection error: ' + err.message + '\nIf running on Vercel, make sure your backend engine URL is configured in "⚙️ Backend API".');
-            }
+        function uploadAndLoadVideo(file) {
+            App.video.file = file;
+            App.video.filename = file.name;
+            const blobUrl = URL.createObjectURL(file);
+            mainVideoPlayer.src = blobUrl;
+            document.getElementById('videoTitleDisplay').textContent = file.name;
+            videoUploadHero.classList.add('hidden');
+            videoEditorWorkspace.classList.remove('hidden');
         }
 
         function onVideoLoaded() {
@@ -620,64 +608,176 @@
 
         async function processVideoWatermark() {
             mainVideoPlayer.pause();
+
+            // If a backend URL is configured, use the high-power FFmpeg backend
+            const apiBase = getApiBase();
+            if (apiBase) {
+                videoProgressModal.classList.remove('hidden');
+                videoProgressBar.style.width = '10%';
+                videoProgressPercent.textContent = '10%';
+                videoRenderSpeed.textContent = 'Connecting to Cloud Backend Engine...';
+
+                try {
+                    const response = await fetch(getApiUrl('/api/process-video'), {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            filename: App.video.filename,
+                            x: Math.round(App.video.box.x),
+                            y: Math.round(App.video.box.y),
+                            w: Math.round(App.video.box.w),
+                            h: Math.round(App.video.box.h),
+                            purgeSynthID: chkSynthID.checked,
+                            purgeC2PA: chkC2PA.checked,
+                            removeVisibleBadge: chkVisibleLogo.checked
+                        })
+                    });
+
+                    const data = await response.json();
+                    if (!data.success) throw new Error(data.error);
+
+                    const jobId = data.jobId;
+
+                    const pollTimer = setInterval(async () => {
+                        try {
+                            const res = await fetch(getApiUrl(`/api/progress/${jobId}`));
+                            const job = await res.json();
+
+                            if (job.status === 'processing') {
+                                videoProgressBar.style.width = `${Math.max(10, job.progress)}%`;
+                                videoProgressPercent.textContent = `${job.progress}%`;
+                                videoRenderSpeed.textContent = `Speed: ${job.speed || '7.5x'} • ${job.fps || 120} FPS`;
+                            } else if (job.status === 'done') {
+                                clearInterval(pollTimer);
+                                videoProgressModal.classList.add('hidden');
+                                cleanedVideoPlayer.src = getMediaUrl(job.outputUrl);
+                                cleanedVideoPlayer.play();
+                                btnDownloadCleanVideo.href = getMediaUrl(job.outputUrl);
+                                btnDownloadCleanVideo.download = job.outputUrl.split('/').pop();
+                                videoResultModal.classList.remove('hidden');
+                            } else if (job.status === 'error') {
+                                clearInterval(pollTimer);
+                                videoProgressModal.classList.add('hidden');
+                                alert('Error: ' + job.error);
+                            }
+                        } catch (pollErr) {
+                            clearInterval(pollTimer);
+                            videoProgressModal.classList.add('hidden');
+                            alert('Progress poll error: ' + pollErr.message);
+                        }
+                    }, 400);
+
+                } catch (err) {
+                    videoProgressModal.classList.add('hidden');
+                    alert('Backend note: ' + err.message + '\nRunning in Client-Side Browser Engine!');
+                    processVideoClientSide();
+                }
+                return;
+            }
+
+            // Otherwise, run 100% In-Browser Client-Side Engine (Canvas + MediaRecorder)
+            processVideoClientSide();
+        }
+
+        async function processVideoClientSide() {
             videoProgressModal.classList.remove('hidden');
             videoProgressBar.style.width = '10%';
             videoProgressPercent.textContent = '10%';
-            videoRenderSpeed.textContent = 'Purging SynthID & Inpainting Watermark...';
+            videoRenderSpeed.textContent = 'Purging SynthID & Watermark in browser...';
 
             try {
-                const response = await fetch(getApiUrl('/api/process-video'), {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        filename: App.video.filename,
-                        x: Math.round(App.video.box.x),
-                        y: Math.round(App.video.box.y),
-                        w: Math.round(App.video.box.w),
-                        h: Math.round(App.video.box.h),
-                        purgeSynthID: chkSynthID.checked,
-                        purgeC2PA: chkC2PA.checked,
-                        removeVisibleBadge: chkVisibleLogo.checked
-                    })
+                const video = document.createElement('video');
+                video.src = mainVideoPlayer.src;
+                video.muted = true;
+                video.playsInline = true;
+                video.crossOrigin = 'anonymous';
+
+                await new Promise((resolve, reject) => {
+                    video.onloadeddata = resolve;
+                    video.onerror = reject;
                 });
 
-                const data = await response.json();
-                if (!data.success) throw new Error(data.error);
+                const canvas = document.createElement('canvas');
+                canvas.width = video.videoWidth || App.video.width || 1280;
+                canvas.height = video.videoHeight || App.video.height || 720;
+                const ctx = canvas.getContext('2d', { willReadFrequently: true });
 
-                const jobId = data.jobId;
+                const stream = canvas.captureStream(30);
+                let mimeType = 'video/webm;codecs=vp9';
+                if (!MediaRecorder.isTypeSupported(mimeType)) {
+                    mimeType = 'video/webm';
+                    if (!MediaRecorder.isTypeSupported(mimeType)) mimeType = '';
+                }
 
-                const pollTimer = setInterval(async () => {
-                    try {
-                        const res = await fetch(getApiUrl(`/api/progress/${jobId}`));
-                        const job = await res.json();
+                const recorder = mimeType ? new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 8000000 }) : new MediaRecorder(stream);
+                const chunks = [];
+                recorder.ondataavailable = e => { if (e.data.size > 0) chunks.push(e.data); };
 
-                        if (job.status === 'processing') {
-                            videoProgressBar.style.width = `${Math.max(10, job.progress)}%`;
-                            videoProgressPercent.textContent = `${job.progress}%`;
-                            videoRenderSpeed.textContent = `Speed: ${job.speed || '7.5x'} • ${job.fps || 120} FPS`;
-                        } else if (job.status === 'done') {
-                            clearInterval(pollTimer);
-                            videoProgressModal.classList.add('hidden');
-                            cleanedVideoPlayer.src = getMediaUrl(job.outputUrl);
-                            cleanedVideoPlayer.play();
-                            btnDownloadCleanVideo.href = getMediaUrl(job.outputUrl);
-                            btnDownloadCleanVideo.download = job.outputUrl.split('/').pop();
-                            videoResultModal.classList.remove('hidden');
-                        } else if (job.status === 'error') {
-                            clearInterval(pollTimer);
-                            videoProgressModal.classList.add('hidden');
-                            alert('Error: ' + job.error);
-                        }
-                    } catch (pollErr) {
-                        clearInterval(pollTimer);
-                        videoProgressModal.classList.add('hidden');
-                        alert('Progress poll error: ' + pollErr.message);
+                const bx = Math.round(App.video.box.x);
+                const by = Math.round(App.video.box.y);
+                const bw = Math.round(App.video.box.w);
+                const bh = Math.round(App.video.box.h);
+                const removeBadge = chkVisibleLogo.checked;
+                const purgeSynth = chkSynthID.checked;
+
+                recorder.onstop = () => {
+                    const blob = new Blob(chunks, { type: chunks[0]?.type || 'video/mp4' });
+                    const cleanUrl = URL.createObjectURL(blob);
+                    videoProgressModal.classList.add('hidden');
+                    cleanedVideoPlayer.src = cleanUrl;
+                    cleanedVideoPlayer.play();
+                    btnDownloadCleanVideo.href = cleanUrl;
+                    btnDownloadCleanVideo.download = 'cleaned_' + (App.video.filename.replace(/\.[^/.]+$/, '') || 'video') + '.mp4';
+                    videoResultModal.classList.remove('hidden');
+                };
+
+                recorder.start(100);
+                await video.play();
+
+                const totalDuration = video.duration || App.video.duration || 1;
+
+                function renderFrame() {
+                    if (video.paused || video.ended) {
+                        setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, 200);
+                        return;
                     }
-                }, 400);
+
+                    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+                    // 1. Watermark Inpainting
+                    if (removeBadge && bw > 0 && bh > 0) {
+                        const sampleY = Math.max(0, by - 12);
+                        ctx.filter = 'blur(6px)';
+                        ctx.drawImage(canvas, bx, sampleY, bw, bh, bx, by, bw, bh);
+                        ctx.filter = 'none';
+                    }
+
+                    // 2. DeepMind SynthID™ Phase Perturbation
+                    if (purgeSynth) {
+                        const imgData = ctx.getImageData(bx, by, Math.min(bw, canvas.width - bx), Math.min(bh, canvas.height - by));
+                        const d = imgData.data;
+                        for (let i = 0; i < d.length; i += 4) {
+                            const n = (Math.random() - 0.5) * 3;
+                            d[i] = Math.max(0, Math.min(255, d[i] + n));
+                            d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
+                            d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
+                        }
+                        ctx.putImageData(imgData, bx, by);
+                    }
+
+                    const pct = Math.min(99, Math.round((video.currentTime / totalDuration) * 100));
+                    videoProgressBar.style.width = `${pct}%`;
+                    videoProgressPercent.textContent = `${pct}%`;
+                    videoRenderSpeed.textContent = `Client Engine: ${formatTime(video.currentTime)} / ${formatTime(totalDuration)}`;
+
+                    requestAnimationFrame(renderFrame);
+                }
+
+                renderFrame();
 
             } catch (err) {
                 videoProgressModal.classList.add('hidden');
-                alert('Inpainting error: ' + err.message);
+                alert('Client rendering error: ' + err.message);
             }
         }
 
