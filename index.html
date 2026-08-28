@@ -537,21 +537,22 @@
         }
 
         window.autoTargetGeminiSparkle = function() {
-            const vw = App.video.width || 1520;
-            const vh = App.video.height || 2702;
+            const vw = App.video.width || 1080;
+            const vh = App.video.height || 1920;
+            const size = Math.round(Math.min(vw, vh) * 0.09);
             App.video.box = {
-                x: Math.round(vw * 0.78),
-                y: Math.round(vh * 0.87),
-                w: Math.round(vw * 0.10),
-                h: Math.round(vh * 0.06)
+                x: Math.round(vw - size - (vw * 0.04)),
+                y: Math.round(vh - size - (vh * 0.04)),
+                w: size,
+                h: size
             };
             renderBoxOnVideo();
         };
 
         window.setVideoBoxPreset = function(preset) {
-            const vw = App.video.width || 1520;
-            const vh = App.video.height || 2702;
-            const size = Math.round(Math.min(vw, vh) * 0.12);
+            const vw = App.video.width || 1080;
+            const vh = App.video.height || 1920;
+            const size = Math.round(Math.min(vw, vh) * 0.09);
 
             if (preset === 'gemini-standard') autoTargetGeminiSparkle();
             else if (preset === 'bottom-right') App.video.box = { x: vw - size - 20, y: vh - size - 20, w: size, h: size };
@@ -700,52 +701,105 @@
         function removeGeminiWatermarkReverseAlpha(ctx, bx, by, bw, bh) {
             const canvasW = ctx.canvas.width;
             const canvasH = ctx.canvas.height;
-            const targetX = Math.max(0, Math.min(canvasW - 10, bx));
-            const targetY = Math.max(0, Math.min(canvasH - 10, by));
-            const targetW = Math.min(bw, canvasW - targetX);
-            const targetH = Math.min(bh, canvasH - targetY);
-            if (targetW <= 4 || targetH <= 4) return;
+
+            const pad = 6;
+            const targetX = Math.max(0, Math.min(canvasW - 10, bx - pad));
+            const targetY = Math.max(0, Math.min(canvasH - 10, by - pad));
+            const targetW = Math.min(bw + pad * 2, canvasW - targetX);
+            const targetH = Math.min(bh + pad * 2, canvasH - targetY);
+            if (targetW <= 8 || targetH <= 8) return;
 
             const imgData = ctx.getImageData(targetX, targetY, targetW, targetH);
             const d = imgData.data;
             const cx = targetW / 2;
             const cy = targetH / 2;
-            const rx = targetW / 2;
-            const ry = targetH / 2;
+            const rx = (targetW - pad * 2) / 2;
+            const ry = (targetH - pad * 2) / 2;
+
+            // 1. Sample perimeter border pixels to construct smooth background gradient field
+            const topRow = new Float32Array(targetW * 3);
+            const botRow = new Float32Array(targetW * 3);
+            const leftCol = new Float32Array(targetH * 3);
+            const rightCol = new Float32Array(targetH * 3);
+
+            for (let x = 0; x < targetW; x++) {
+                const i0 = x * 4;
+                const i1 = (targetW + x) * 4;
+                topRow[x * 3] = (d[i0] + d[i1]) * 0.5;
+                topRow[x * 3 + 1] = (d[i0 + 1] + d[i1 + 1]) * 0.5;
+                topRow[x * 3 + 2] = (d[i0 + 2] + d[i1 + 2]) * 0.5;
+
+                const j0 = ((targetH - 1) * targetW + x) * 4;
+                const j1 = ((targetH - 2) * targetW + x) * 4;
+                botRow[x * 3] = (d[j0] + d[j1]) * 0.5;
+                botRow[x * 3 + 1] = (d[j0 + 1] + d[j1 + 1]) * 0.5;
+                botRow[x * 3 + 2] = (d[j0 + 2] + d[j1 + 2]) * 0.5;
+            }
 
             for (let y = 0; y < targetH; y++) {
+                const i0 = (y * targetW) * 4;
+                const i1 = (y * targetW + 1) * 4;
+                leftCol[y * 3] = (d[i0] + d[i1]) * 0.5;
+                leftCol[y * 3 + 1] = (d[i0 + 1] + d[i1 + 1]) * 0.5;
+                leftCol[y * 3 + 2] = (d[i0 + 2] + d[i1 + 2]) * 0.5;
+
+                const j0 = (y * targetW + (targetW - 1)) * 4;
+                const j1 = (y * targetW + (targetW - 2)) * 4;
+                rightCol[y * 3] = (d[j0] + d[j1]) * 0.5;
+                rightCol[y * 3 + 1] = (d[j0 + 1] + d[j1 + 1]) * 0.5;
+                rightCol[y * 3 + 2] = (d[j0 + 2] + d[j1 + 2]) * 0.5;
+            }
+
+            // 2. Process each pixel with Adaptive Reverse Alpha + Seamless Gradient Infill
+            for (let y = 0; y < targetH; y++) {
+                const normY = y / (targetH - 1);
                 const dy = Math.abs(y - cy) / ry;
                 const sqrtDy = Math.sqrt(dy);
                 const rowOffset = y * targetW * 4;
 
                 for (let x = 0; x < targetW; x++) {
+                    const normX = x / (targetW - 1);
                     const dx = Math.abs(x - cx) / rx;
                     const dist = Math.sqrt(dx) + sqrtDy;
 
+                    // Astroid star alpha curve
                     let a = 0;
                     if (dist < 1.0) {
-                        // Exact 4-pointed Gemini sparkle astroid curve
-                        a = Math.min(0.78, Math.pow(1.0 - dist, 0.60) * 0.72);
-                    } else if (dist < 1.25) {
-                        // Smooth outer aura
-                        a = (1.25 - dist) * 0.06;
+                        a = Math.min(0.50, Math.pow(1.0 - dist, 0.65) * 0.45);
+                    } else if (dist < 1.20) {
+                        a = (1.20 - dist) * 0.04;
                     }
 
-                    if (a > 0.01) {
+                    if (a > 0.005) {
                         const idx = rowOffset + (x * 4);
-                        const oneMinusA = 1.0 - a;
-                        
-                        // Reverse Alpha Compositing Formula: original = (observed - alpha * 255) / (1 - alpha)
-                        const r = (d[idx] - a * 255) / oneMinusA;
-                        const g = (d[idx + 1] - a * 255) / oneMinusA;
-                        const b = (d[idx + 2] - a * 255) / oneMinusA;
 
-                        d[idx] = Math.max(0, Math.min(255, (r + 0.5) | 0));
-                        d[idx + 1] = Math.max(0, Math.min(255, (g + 0.5) | 0));
-                        d[idx + 2] = Math.max(0, Math.min(255, (b + 0.5) | 0));
+                        // Smooth background estimate via 2D bilinear border interpolation
+                        const bgR = ((1 - normX) * leftCol[y * 3] + normX * rightCol[y * 3] + (1 - normY) * topRow[x * 3] + normY * botRow[x * 3]) * 0.5;
+                        const bgG = ((1 - normX) * leftCol[y * 3 + 1] + normX * rightCol[y * 3 + 1] + (1 - normY) * topRow[x * 3 + 1] + normY * botRow[x * 3 + 1]) * 0.5;
+                        const bgB = ((1 - normX) * leftCol[y * 3 + 2] + normX * rightCol[y * 3 + 2] + (1 - normY) * topRow[x * 3 + 2] + normY * botRow[x * 3 + 2]) * 0.5;
+
+                        // Adaptive additive light subtraction (never turns dark or black!)
+                        const subR = a * Math.max(0, 245 - bgR);
+                        const subG = a * Math.max(0, 245 - bgG);
+                        const subB = a * Math.max(0, 245 - bgB);
+
+                        const origR = d[idx] - subR;
+                        const origG = d[idx + 1] - subG;
+                        const origB = d[idx + 2] - subB;
+
+                        // Smooth blend with background field based on alpha strength
+                        const blendWeight = Math.min(1.0, a * 1.8);
+                        const finalR = origR * (1 - blendWeight * 0.5) + bgR * (blendWeight * 0.5);
+                        const finalG = origG * (1 - blendWeight * 0.5) + bgG * (blendWeight * 0.5);
+                        const finalB = origB * (1 - blendWeight * 0.5) + bgB * (blendWeight * 0.5);
+
+                        d[idx] = Math.max(0, Math.min(255, (finalR + 0.5) | 0));
+                        d[idx + 1] = Math.max(0, Math.min(255, (finalG + 0.5) | 0));
+                        d[idx + 2] = Math.max(0, Math.min(255, (finalB + 0.5) | 0));
                     }
                 }
             }
+
             ctx.putImageData(imgData, targetX, targetY);
         }
 
