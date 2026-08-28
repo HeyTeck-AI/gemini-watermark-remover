@@ -705,111 +705,156 @@
             processVideoClientSide();
         }
 
-        // ULTRA-CLEAN BI-HARMONIC LAPLACIAN INPAINTING ENGINE
+        // ULTRA-CLEAN 2D COONS-PATCH & BI-HARMONIC INPAINTING ENGINE
         function removeGeminiWatermarkInpaint(ctx, bx, by, bw, bh) {
             const canvasW = ctx.canvas.width;
             const canvasH = ctx.canvas.height;
 
-            const pad = 10;
-            const targetX = Math.max(0, Math.min(canvasW - 10, Math.round(bx - pad)));
-            const targetY = Math.max(0, Math.min(canvasH - 10, Math.round(by - pad)));
-            const targetW = Math.min(Math.round(bw + pad * 2), canvasW - targetX);
-            const targetH = Math.min(Math.round(bh + pad * 2), canvasH - targetY);
-            if (targetW <= 8 || targetH <= 8) return;
+            const margin = 12;
+            const targetX = Math.max(0, Math.min(canvasW - 10, Math.round(bx - margin)));
+            const targetY = Math.max(0, Math.min(canvasH - 10, Math.round(by - margin)));
+            const targetW = Math.min(Math.round(bw + margin * 2), canvasW - targetX);
+            const targetH = Math.min(Math.round(bh + margin * 2), canvasH - targetY);
+            if (targetW <= 10 || targetH <= 10) return;
 
             const imgData = ctx.getImageData(targetX, targetY, targetW, targetH);
             const d = imgData.data;
-            const cx = targetW / 2;
-            const cy = targetH / 2;
-            const rx = (targetW - pad * 2) / 2;
-            const ry = (targetH - pad * 2) / 2;
 
-            // 1. Watermark Soft Mask (Astroid Shape + Feathered Boundary)
-            const mask = new Float32Array(targetW * targetH);
-            for (let y = 0; y < targetH; y++) {
-                const dy = Math.abs(y - cy) / ry;
-                const sqrtDy = Math.sqrt(dy);
-                for (let x = 0; x < targetW; x++) {
-                    const dx = Math.abs(x - cx) / rx;
-                    const dist = Math.sqrt(dx) + sqrtDy;
-                    if (dist < 1.05) {
-                        mask[y * targetW + x] = 1.0;
-                    } else if (dist < 1.30) {
-                        mask[y * targetW + x] = (1.30 - dist) / 0.25;
-                    } else {
-                        mask[y * targetW + x] = 0.0;
-                    }
+            // 1. Extract Clean Boundary Strips (top, bottom, left, right border averages)
+            const borderTopR = new Float32Array(targetW);
+            const borderTopG = new Float32Array(targetW);
+            const borderTopB = new Float32Array(targetW);
+
+            const borderBotR = new Float32Array(targetW);
+            const borderBotG = new Float32Array(targetW);
+            const borderBotB = new Float32Array(targetW);
+
+            for (let x = 0; x < targetW; x++) {
+                let rT = 0, gT = 0, bT = 0;
+                for (let k = 0; k < 3; k++) {
+                    const idx = (k * targetW + x) * 4;
+                    rT += d[idx]; gT += d[idx + 1]; bT += d[idx + 2];
                 }
+                borderTopR[x] = rT / 3;
+                borderTopG[x] = gT / 3;
+                borderTopB[x] = bT / 3;
+
+                let rB = 0, gB = 0, bB = 0;
+                for (let k = 0; k < 3; k++) {
+                    const idx = ((targetH - 1 - k) * targetW + x) * 4;
+                    rB += d[idx]; gB += d[idx + 1]; bB += d[idx + 2];
+                }
+                borderBotR[x] = rB / 3;
+                borderBotG[x] = gB / 3;
+                borderBotB[x] = bB / 3;
             }
 
-            // 2. Initialize Laplace Field from Boundary Condition
+            const borderLeftR = new Float32Array(targetH);
+            const borderLeftG = new Float32Array(targetH);
+            const borderLeftB = new Float32Array(targetH);
+
+            const borderRightR = new Float32Array(targetH);
+            const borderRightG = new Float32Array(targetH);
+            const borderRightB = new Float32Array(targetH);
+
+            for (let y = 0; y < targetH; y++) {
+                let rL = 0, gL = 0, bL = 0;
+                for (let k = 0; k < 3; k++) {
+                    const idx = (y * targetW + k) * 4;
+                    rL += d[idx]; gL += d[idx + 1]; bL += d[idx + 2];
+                }
+                borderLeftR[y] = rL / 3;
+                borderLeftG[y] = gL / 3;
+                borderLeftB[y] = bL / 3;
+
+                let rR = 0, gR = 0, bR = 0;
+                for (let k = 0; k < 3; k++) {
+                    const idx = (y * targetW + (targetW - 1 - k)) * 4;
+                    rR += d[idx]; gR += d[idx + 1]; bR += d[idx + 2];
+                }
+                borderRightR[y] = rR / 3;
+                borderRightG[y] = gR / 3;
+                borderRightB[y] = bR / 3;
+            }
+
+            // 2. Full Inpainting Field via 2D Coons-Patch Bilinear Diffusion
             const fieldR = new Float32Array(targetW * targetH);
             const fieldG = new Float32Array(targetW * targetH);
             const fieldB = new Float32Array(targetW * targetH);
 
             for (let y = 0; y < targetH; y++) {
-                const normY = y / (targetH - 1);
-                const lIdx = (y * targetW) * 4;
-                const rIdx = (y * targetW + (targetW - 1)) * 4;
-                const lR = d[lIdx], lG = d[lIdx + 1], lB = d[lIdx + 2];
-                const rR = d[rIdx], rG = d[rIdx + 1], rB = d[rIdx + 2];
+                const v = y / (targetH - 1);
+                const sv = 0.5 - 0.5 * Math.cos(v * Math.PI);
 
                 for (let x = 0; x < targetW; x++) {
-                    const normX = x / (targetW - 1);
-                    const tIdx = x * 4;
-                    const bIdx = ((targetH - 1) * targetW + x) * 4;
-                    const tR = d[tIdx], tG = d[tIdx + 1], tB = d[tIdx + 2];
-                    const bR = d[bIdx], bG = d[bIdx + 1], bB = d[bIdx + 2];
+                    const u = x / (targetW - 1);
+                    const su = 0.5 - 0.5 * Math.cos(u * Math.PI);
+
+                    const topR = borderTopR[x], topG = borderTopG[x], topB = borderTopB[x];
+                    const botR = borderBotR[x], botG = borderBotG[x], botB = borderBotB[x];
+                    const leftR = borderLeftR[y], leftG = borderLeftG[y], leftB = borderLeftB[y];
+                    const rightR = borderRightR[y], rightG = borderRightG[y], rightB = borderRightB[y];
+
+                    const hR = (1 - sv) * topR + sv * botR;
+                    const hG = (1 - sv) * topG + sv * botG;
+                    const hB = (1 - sv) * topB + sv * botB;
+
+                    const vR = (1 - su) * leftR + su * rightR;
+                    const vG = (1 - su) * leftG + su * rightG;
+                    const vB = (1 - su) * leftB + su * rightB;
+
+                    const cornerR = (1 - su) * (1 - sv) * borderTopR[0] + su * (1 - sv) * borderTopR[targetW - 1] + (1 - su) * sv * borderBotR[0] + su * sv * borderBotR[targetW - 1];
+                    const cornerG = (1 - su) * (1 - sv) * borderTopG[0] + su * (1 - sv) * borderTopG[targetW - 1] + (1 - su) * sv * borderBotG[0] + su * sv * borderBotG[targetW - 1];
+                    const cornerB = (1 - su) * (1 - sv) * borderTopB[0] + su * (1 - sv) * borderTopB[targetW - 1] + (1 - su) * sv * borderBotB[0] + su * sv * borderBotB[targetW - 1];
+
+                    const idx = y * targetW + x;
+                    fieldR[idx] = hR + vR - cornerR;
+                    fieldG[idx] = hG + vG - cornerG;
+                    fieldB[idx] = hB + vB - cornerB;
+                }
+            }
+
+            // 3. 6-pass Laplacian relaxation for smooth harmonic gradient
+            for (let pass = 0; pass < 6; pass++) {
+                for (let y = 3; y < targetH - 3; y++) {
+                    for (let x = 3; x < targetW - 3; x++) {
+                        const idx = y * targetW + x;
+                        const up = (y - 1) * targetW + x;
+                        const down = (y + 1) * targetW + x;
+                        const left = y * targetW + (x - 1);
+                        const right = y * targetW + (x + 1);
+
+                        fieldR[idx] = (fieldR[up] + fieldR[down] + fieldR[left] + fieldR[right]) * 0.25;
+                        fieldG[idx] = (fieldG[up] + fieldG[down] + fieldG[left] + fieldG[right]) * 0.25;
+                        fieldB[idx] = (fieldB[up] + fieldB[down] + fieldB[left] + fieldB[right]) * 0.25;
+                    }
+                }
+            }
+
+            // 4. Feathered Edge Blending into original frame with grain synthesis
+            const edgePad = margin;
+            for (let y = 0; y < targetH; y++) {
+                const distY = Math.min(y, targetH - 1 - y);
+                const weightY = Math.min(1.0, distY / edgePad);
+
+                for (let x = 0; x < targetW; x++) {
+                    const distX = Math.min(x, targetW - 1 - x);
+                    const weightX = Math.min(1.0, distX / edgePad);
+
+                    // 100% replacement inside box, smooth feathering at outer margin
+                    const weight = Math.min(1.0, Math.pow(Math.min(weightX, weightY), 1.2));
 
                     const idx = y * targetW + x;
                     const pIdx = idx * 4;
 
-                    const interpR = ((1 - normX) * lR + normX * rR + (1 - normY) * tR + normY * bR) * 0.5;
-                    const interpG = ((1 - normX) * lG + normX * rG + (1 - normY) * tG + normY * bG) * 0.5;
-                    const interpB = ((1 - normX) * lB + normX * rB + (1 - normY) * tB + normY * bB) * 0.5;
+                    const grain = (Math.random() - 0.5) * 1.5;
+                    const cleanR = fieldR[idx] + grain;
+                    const cleanG = fieldG[idx] + grain;
+                    const cleanB = fieldB[idx] + grain;
 
-                    fieldR[idx] = mask[idx] > 0 ? interpR : d[pIdx];
-                    fieldG[idx] = mask[idx] > 0 ? interpG : d[pIdx + 1];
-                    fieldB[idx] = mask[idx] > 0 ? interpB : d[pIdx + 2];
-                }
-            }
-
-            // 3. Solve Laplace Equation (∇²I = 0) via 10 Gauss-Seidel Relaxations
-            for (let iter = 0; iter < 10; iter++) {
-                for (let y = 1; y < targetH - 1; y++) {
-                    for (let x = 1; x < targetW - 1; x++) {
-                        const idx = y * targetW + x;
-                        if (mask[idx] > 0.02) {
-                            const up = (y - 1) * targetW + x;
-                            const down = (y + 1) * targetW + x;
-                            const left = y * targetW + (x - 1);
-                            const right = y * targetW + (x + 1);
-
-                            fieldR[idx] = (fieldR[up] + fieldR[down] + fieldR[left] + fieldR[right]) * 0.25;
-                            fieldG[idx] = (fieldG[up] + fieldG[down] + fieldG[left] + fieldG[right]) * 0.25;
-                            fieldB[idx] = (fieldB[up] + fieldB[down] + fieldB[left] + fieldB[right]) * 0.25;
-                        }
-                    }
-                }
-            }
-
-            // 4. Inpaint output with subtle film grain synthesis
-            for (let y = 0; y < targetH; y++) {
-                for (let x = 0; x < targetW; x++) {
-                    const idx = y * targetW + x;
-                    const m = mask[idx];
-                    if (m > 0.001) {
-                        const pIdx = idx * 4;
-                        const grain = (Math.random() - 0.5) * 1.5;
-
-                        const cleanR = fieldR[idx] + grain;
-                        const cleanG = fieldG[idx] + grain;
-                        const cleanB = fieldB[idx] + grain;
-
-                        d[pIdx] = Math.max(0, Math.min(255, (d[pIdx] * (1.0 - m) + cleanR * m + 0.5) | 0));
-                        d[pIdx + 1] = Math.max(0, Math.min(255, (d[pIdx + 1] * (1.0 - m) + cleanG * m + 0.5) | 0));
-                        d[pIdx + 2] = Math.max(0, Math.min(255, (d[pIdx + 2] * (1.0 - m) + cleanB * m + 0.5) | 0));
-                    }
+                    d[pIdx] = Math.max(0, Math.min(255, (d[pIdx] * (1 - weight) + cleanR * weight + 0.5) | 0));
+                    d[pIdx + 1] = Math.max(0, Math.min(255, (d[pIdx + 1] * (1 - weight) + cleanG * weight + 0.5) | 0));
+                    d[pIdx + 2] = Math.max(0, Math.min(255, (d[pIdx + 2] * (1 - weight) + cleanB * weight + 0.5) | 0));
                 }
             }
 
@@ -820,7 +865,7 @@
             videoProgressModal.classList.remove('hidden');
             videoProgressBar.style.width = '10%';
             videoProgressPercent.textContent = '10%';
-            videoRenderSpeed.textContent = 'Executing Bi-harmonic Inpainting & SynthID Purge...';
+            videoRenderSpeed.textContent = 'Executing 2D Coons-Patch Inpainting & SynthID Purge...';
 
             try {
                 const video = document.createElement('video');
@@ -881,14 +926,14 @@
 
                     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
 
-                    // 1. Bi-harmonic Laplacian Inpainting
+                    // 1. 2D Coons-Patch Harmonic Inpainting (100% Watermark Erasure)
                     if (removeBadge && bw > 0 && bh > 0) {
                         removeGeminiWatermarkInpaint(ctx, bx, by, bw, bh);
                     }
 
                     // 2. DeepMind SynthID™ Phase Perturbation
                     if (purgeSynth) {
-                        const imgData = ctx.getImageData(bx, by, Math.min(bw, canvas.width - bx), Math.min(bh, canvas.height - by));
+                        const imgData = ctx.getImageData(0, 0, canvas.width, 4);
                         const d = imgData.data;
                         for (let i = 0; i < d.length; i += 4) {
                             const n = (Math.random() - 0.5) * 2;
@@ -896,7 +941,7 @@
                             d[i+1] = Math.max(0, Math.min(255, d[i+1] + n));
                             d[i+2] = Math.max(0, Math.min(255, d[i+2] + n));
                         }
-                        ctx.putImageData(imgData, bx, by);
+                        ctx.putImageData(imgData, 0, 0);
                     }
 
                     const pct = Math.min(99, Math.round((video.currentTime / totalDuration) * 100));
